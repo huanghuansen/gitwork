@@ -1,0 +1,583 @@
+	device_create函数分析：　　
+device_create　　　　　　　　/*creates a device and registers it with sysfs*/  创建设备节点
+　　　　device_create_vargs
+　　　　　　　　device_register
+　　　　　　　　　　　　device_add
+　　　　　　　　　　　　　　　　kobject_uevent(&dev->kobj, KOBJ_ADD);
+　　　　　　　　　　　　　　　　　　　　kobject_uevent_env(kobj, action, NULL);　　　　/*send an uevent with environmental data*/
+　　　　　　　　　　　　　　　　　　　　　　　　if (uevent_helper[0]){
+　　　　　　　　　　　　　　　　　　　　　　　　...
+　　　　　　　　　　　　　　　　　　　　　　　　call_usermodehelper(argv[0], argv,env->envp, UMH_WAIT_EXEC);}
+ 
+1:检查AP端串口配置是否ok：
+a:高通平台查看DMA传输:
+echo 1 > /sys/kernel/debug/msm_serial_hsl/loopback.0 //打开回环开关
+adb shell cat /dev/ttyHSL1
+另起窗口
+# adb shell
+# echo 11111111 > /dev/ttyHSL1
+若DMA通道ok，控制台会循环显示；
+b：查看uart gpio是否ok：
+tx高电平、rfr为低电平，rx,cts为输入;       
+如果tx为低电平，那么gpio肯定没有配置好，再次检查gpio配置问题；
+如果以上2步都ok，那么UART应该ok了，再次检查：
+adb shell cat /dev/ttyHSL1
+将TX与RX短接；
+另起窗口
+# adb shell
+# echo 11111111 > /dev/ttyHSL1
+循环显示那么恭喜UART功能配置好了。
+
+在当前目录下搜索字符串  命令：
+
+查找目录下的所有文件中是否含有某个字符串 
+find .|xargs grep -ri "backboard_uart_sleep*" 
+查找目录下的所有文件中是否含有某个字符串,并且只打印出文件名 
+find .|xargs grep -ri "IBM" -l 
+find .|xargs grep -ri "clk_gcc_blsp1_uart2_apps_clk"
+grep -ri "msm8916-perf_defconfig"
+
+grep -ri "serial_device" 
+日志过滤：
+
+logcat  NfcService:I*:S
+logcat -s NFC HUAN
+logcat  NFC HUAN:E*:S
+
+logcat -s SerialManager
+查看系统服务所有系统服务
+
+dumpsys -l
+
+PIN码或配对密钥不正确
+交叉编译器路径
+export PATH＝$PATH:/home/qimon/q7/gcc-linaro-arm-linux-gnueabihf-4.9-2014.07_linux/bin
+
+mount -o nolock,rw -t nfs 192.168.1.113:/home/qimon/q7/uart_test  /mnt/
+修改/etc/exports 最后一行加上
+/home/qimon/q7/uart_test  *(rw,sync,no_root_squash,no_subtree_check)
+
+1.
+打印内核安全策略关闭
+关闭selinux
+#setenforce 0
+2.查看终端打印级别
+ cat /proc/sys/kernel/printk
+
+ 3. id -Z 
+        显示了你的shell的安全上下文；
+    ps -Z
+
+        检查进程的安全上下文；
+    ls -Z
+        检查文件、目录的安全上下文；
+4
+
+#allow untrusted_app tty_device:chr_file rw_file_perms
+
+allow untrusted_app device:chr_file { write read open ioctl}; 
+
+5.camera模块分析
+模块列表：
+server_process.c
+  static mct_module_init_name_t modules_list[] = {
+  {"sensor", module_sensor_init,   module_sensor_deinit, NULL},//传感器模块初始化
+  {"iface",  module_iface_init,   module_iface_deinit, NULL},
+  {"isp",    module_isp_init,      module_isp_deinit, NULL},
+  {"stats",  stats_module_init,    stats_module_deinit, NULL},
+  {"pproc",  pproc_module_init,    pproc_module_deinit, NULL},
+  {"imglib", module_imglib_init, module_imglib_deinit, NULL},
+};
+//传感器列表  module_sersor.c
+static int32_t (*sub_module_init[])(sensor_func_tbl_t *) = {
+  [SUB_MODULE_SENSOR]       = sensor_sub_module_init,
+  [SUB_MODULE_CHROMATIX]    = chromatix_sub_module_init,
+  [SUB_MODULE_ACTUATOR]     = actuator_sub_module_init,
+  [SUB_MODULE_EEPROM]       = eeprom_sub_module_init,
+  [SUB_MODULE_LED_FLASH]    = led_flash_sub_module_init,
+  [SUB_MODULE_STROBE_FLASH] = strobe_flash_sub_module_init,
+  [SUB_MODULE_CSIPHY]       = csiphy_sub_module_init,
+  [SUB_MODULE_CSIPHY_3D]    = csiphy_sub_module_init,
+  [SUB_MODULE_CSID]         = csid_sub_module_init,
+  [SUB_MODULE_CSID_3D]      = csid_sub_module_init,
+  [SUB_MODULE_OIS]          = NULL,
+};
+
+
+
+分析module_sensor_int初始化过程：
+module_sensor_init 
+填充MCT
+     /* Fill function table in MCT module */
+  s_module->set_mod = module_sensor_set_mod;
+  s_module->query_mod = module_sensor_query_mod;
+  s_module->start_session = module_sensor_start_session;
+  s_module->stop_session = module_sensor_stop_session;
+            ret = sensor_probe(sd_fd, sensor_libs[i]);
+  /* module_sensor_probe_sensors */
+  ret = sensor_init_probe(module_ctrl)；//初始probe
+             dev_fd = open("/dev/media%d", O_RDWR | O_NONBLOCK);//打开多媒体设备
+             rc = ioctl(dev_fd, MEDIA_IOC_DEVICE_INFO, &mdev_info);//设备多媒体
+              sd_fd = open("/dev/%s", O_RDWR); //打开video设备
+            ret = sensor_probe(sd_fd, sensor_libs[i]);//进入cameraprobe初始化
+                       rc = sensor_load_library(sensor_name, &sensor_lib_params);//导入camera库,获取配置信息
+                          cfg.cfgtype = CFG_SINIT_PROBE;
+                          cfg.cfg.setting = slave_info;
+                         ret = ioctl(d, VIDIOC_MSM_SENSOR_INIT_CFG,  &cfg);//初始化摄像头
+  ret = mct_list_traverse(module_ctrl->sensor_bundle, module_sensors_subinit,// 初始化sensor_subinit,进入module_sensors_subinit函数分析
+                 static boolean module_sensors_subinit(void *data, void *user_data)；
+             for (i = 0; i < SUB_MODULE_MAX; i++) 
+        rc = sub_module_init[i](&s_bundle->module_sensor_params[i]->func_tbl); 初始化每一项func_tbl，建立起联系
+
+  static int32_t (*sub_module_init[])(sensor_func_tbl_t *) = {
+  [SUB_MODULE_SENSOR]       = sensor_sub_module_init,
+  [SUB_MODULE_CHROMATIX]    = chromatix_sub_module_init,
+  [SUB_MODULE_ACTUATOR]     = actuator_sub_module_init,
+  [SUB_MODULE_EEPROM]       = eeprom_sub_module_init,
+  [SUB_MODULE_LED_FLASH]    = led_flash_sub_module_init,
+  [SUB_MODULE_STROBE_FLASH] = strobe_flash_sub_module_init,
+  [SUB_MODULE_CSIPHY]       = csiphy_sub_module_init,
+  [SUB_MODULE_CSIPHY_3D]    = csiphy_sub_module_init,
+  [SUB_MODULE_CSID]         = csid_sub_module_init,
+  [SUB_MODULE_CSID_3D]      = csid_sub_module_init,
+  [SUB_MODULE_OIS]          = NULL,
+};
+分析：
+ int32_t sensor_sub_module_init(sensor_func_tbl_t *func_tbl)
+{
+  func_tbl->open = sensor_open;
+  func_tbl->process = sensor_process;
+  func_tbl->close = sensor_close;
+  return SENSOR_SUCCESS;
+}
+
+func_tbl->open = sensor_open; 打开设备
+
+ func_tbl->process = sensor_process;调用这个设置各种东西，传命令进去
+
+
+
+6.驱动总线模型匹配probe函数调用流程
+驱动端：
+int driver_register(struct device_driver *drv)
+       ret = bus_add_driver(drv);
+            	error = driver_attach(drv);
+            static int __driver_attach(struct device *dev, void *data)；
+                      		driver_probe_device(drv, dev);
+                                                             ret = really_probe(dev, drv);
+                                                     
+设备端：
+   int device_register(struct device *dev)   //会创建设备节点
+          int device_add(struct device *dev)
+               	bus_probe_device(dev);
+                         ret = device_attach(dev);
+                                 static int __device_attach(struct device_driver *drv, void *data)
+                                        int driver_probe_device(struct device_driver *drv, struct device *dev)
+                                                ret = really_probe(dev, drv);
+
+wifi 连接adb
+adb tcpip 5555
+
+
+
+
+
+
+
+7，函数 module_platform_driver(xxx);
+
+该函数定义在include/linux/platform_device.h文件中：
+ #define module_platform_driver(__platform_driver) \
+         module_driver(__platform_driver, platform_driver_register, \
+                         platform_driver_unregister)
+而module_driver()函数则定义在include/linux/device.h文件中：
+#define module_driver(__driver, __register, __unregister, ...) \
+static int __init __driver##_init(void) \
+{ \
+        return __register(&(__driver) , ##__VA_ARGS__); \
+} \
+module_init(__driver##_init); \
+static void __exit __driver##_exit(void) \
+{ \
+        __unregister(&(__driver) , ##__VA_ARGS__); \
+} \
+module_exit(__driver##_exit);
+
+module_platform_driver(xxx);展开后就是如下形式：
+static int __init gpio_pmodoled_driver_init(void)
+{
+        return platform_driver_register(&xxx);
+}
+module_init(xxx);
+static void __exit gpio_pmodoled_driver_init(void)
+{
+        return platform_driver_unregister(&xx);
+}
+module_exit(xxx);
+
+
+8.设备树展开的过程分析 创建device node链表
+
+  start_kernel(void)   init(main.c)
+      setup_arch(&command_line);
+           unflatten_device_tree();  drivers/of/fdt.c
+9.
+遍历device nodo链表，创建并注册platform_device
+
+    start_kernel(void)   init(main.c)
+         rest_init();
+             kernel_thread(kernel_init, NULL, CLONE_FS | CLONE_SIGHAND);//c创建内核线程初始化
+                kernel_init_freeable();
+                   do_basic_setup();
+                       do_initcalls();
+           在do_initcalls函数中，kernel会依次执行各个initcall函数，在这个过程中，会调用 customize_machine，具体如下:
+
+ static int __init customize_machine(void)
+{
+	/*
+	 * customizes platform devices, or adds new ones
+	 * On DT based machines, we fall back to populating the
+	 * machine from the device tree, if no callback is provided,
+	 * otherwise we would always need an init_machine callback.
+	 */
+	if (machine_desc->init_machine)
+		machine_desc->init_machine();
+#ifdef CONFIG_OF
+	else
+		of_platform_populate(NULL, of_default_bus_match_table,
+					NULL, NULL);
+#endif
+	return 0;
+}
+arch_initcall(customize_machine);
+就调用到 board-8916.c的  .init_machine来初始化
+static void __init msm8916_init(void)
+{
+	struct of_dev_auxdata *adata = msm8916_auxdata_lookup;
+
+	/*
+	 * populate devices from DT first so smem probe will get called as part
+	 * of msm_smem_init.  socinfo_init needs smem support so call
+	 * msm_smem_init before it.
+	 */
+	of_platform_populate(NULL, of_default_bus_match_table, adata, NULL);
+	msm_smem_init();
+
+	if (socinfo_init() < 0)
+		pr_err("%s: socinfo_init() failed\n", __func__);
+
+	msm8916_add_drivers();
+}
+
+ 在of_platform_populate中会调用of_platform_bus_create ---> of_platform_device_create_pdata，完成platform_device的创建和注册。那么Linux系统是怎么知道哪些device node要注册为platform_device，哪些是用于i2c_client，哪些是用于spi_device？不知道你有没有注意到调用of_platform_populate的时候给它传递了一个参数of_default_bus_match_table，它的定义如下：
+
+const struct of_device_id of_default_bus_match_table[] = {
+    { .compatible = "simple-bus", },
+    { .compatible = "simple-mfd", },
+#ifdef CONFIG_ARM_AMBA
+    { .compatible = "arm,amba-bus", },
+#endif /* CONFIG_ARM_AMBA */
+    {} /* Empty terminated list */
+};
+    是这个意思：如果某个device node的compatible属性的值与数组of_default_bus_match_table中的任意一个元素的compatible的值match（但是对于compatible属性的值是arm,primecell的节点有些特殊，它是单独处理的），那么这个device node的child device node（device_node的child成员变量指向的是这个device node的子节点，也是一个链表）仍旧会被注册为platform_device。
+
+of_platform_populate：
+
+   1: int of_platform_populate(struct device_node *root,
+   2:             const struct of_device_id *matches,
+   3:             const struct of_dev_auxdata *lookup,
+   4:             struct device *parent)
+   5: {
+   6:     struct device_node *child;
+   7:     int rc = 0;
+   8:  
+   9:     root = root ? of_node_get(root) : of_find_node_by_path("/");  // 找到root device node
+  10:     if (!root)
+  11:         return -EINVAL;
+  12:  
+  13:     for_each_child_of_node(root, child) { // 遍历root device node的child device node
+  14:         rc = of_platform_bus_create(child, matches, lookup, parent, true);
+  15:         if (rc) {
+  16:             of_node_put(child);
+  17:             break;
+  18:         }
+  19:     }
+  20:     of_node_set_flag(root, OF_POPULATED_BUS);
+  21:  
+  22:     of_node_put(root);
+  23:     return rc;
+  24: }
+of_platform_bus_create ：
+
+   1: static int of_platform_bus_create(struct device_node *bus,
+   2:                   const struct of_device_id *matches,
+   3:                   const struct of_dev_auxdata *lookup,
+   4:                   struct device *parent, bool strict)
+   5: {
+   6:     const struct of_dev_auxdata *auxdata;
+   7:     struct device_node *child;
+   8:     struct platform_device *dev;
+   9:     const char *bus_id = NULL;
+  10:     void *platform_data = NULL;
+  11:     int rc = 0;
+  12:  
+  13:     /* Make sure it has a compatible property */
+  14:     if (strict && (!of_get_property(bus, "compatible", NULL))) { // 这样可以把chosen、aliases、memory等没有compatible属性的节点排除在外
+  15:         pr_debug("%s() - skipping %s, no compatible prop\n",
+  16:              __func__, bus->full_name);
+  17:         return 0;
+  18:     }
+  19:  
+  20:     auxdata = of_dev_lookup(lookup, bus);  // tiny4412给lookup传递的是NULL
+  21:     if (auxdata) {
+  22:         bus_id = auxdata->name;
+  23:         platform_data = auxdata->platform_data;
+  24:     }
+  25:  
+  26:     if (of_device_is_compatible(bus, "arm,primecell")) {
+  27:         /*
+  28:          * Don't return an error here to keep compatibility with older
+  29:          * device tree files.
+  30:          */
+  31:         of_amba_device_create(bus, bus_id, platform_data, parent);
+  32:         return 0;
+  33:     }
+  34:  
+  35:     dev = of_platform_device_create_pdata(bus, bus_id, platform_data, parent); // 根据device node创建 platform_device并注册
+  36:     if (!dev || !of_match_node(matches, bus)) // 判断是不是需要继续遍历这个device node下的child device node
+  37:         return 0;
+  38:  
+  39:     for_each_child_of_node(bus, child) { // 遍历这个device node下的child device node，将child device node也注册为platform_device
+  40:         pr_debug("   create child: %s\n", child->full_name);
+  41:         rc = of_platform_bus_create(child, matches, lookup, &dev->dev, strict);
+  42:         if (rc) {
+  43:             of_node_put(child);
+  44:             break;
+  45:         }
+  46:     }
+  47:     of_node_set_flag(bus, OF_POPULATED_BUS);
+  48:     return rc;
+  49: }
+        
+10.DEVICE_ATTR使用的方法
+static ssize_t backboard_power_enable_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+	struct msm_otg *motg = the_msm_otg;
+	struct msm_otg_platform_data *pdata = motg->pdata;
+	return snprintf(buf, PAGE_SIZE, "%s\n",
+			gpio_get_value(pdata->backboard_power) ?
+				"enabled" : "disabled");
+}
+
+static ssize_t backboard_power_enable_store(struct device *dev,
+		struct device_attribute *attr, const char
+		*buf, size_t size)
+{
+	struct msm_otg *motg = the_msm_otg;
+	struct msm_otg_platform_data *pdata = motg->pdata;
+	if(!strnicmp(buf, "enable", 6)) {
+		gpio_set_value(pdata->backboard_power, 1);
+		return size;
+	} else if (!strnicmp(buf, "disable", 7)) {
+		gpio_set_value(pdata->backboard_power, 0);
+		return size;
+	}
+
+	return -EINVAL;
+}
+
+static DEVICE_ATTR(backboard_power_enable,
+		S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH,
+		backboard_power_enable_show, backboard_power_enable_store);
+
+ 入口：device_create_file(&pdev->dev, &dev_attr_backboard_power_enable);
+出口：device_remove_file(&pdev->dev,
+			&dev_attr_backboard_power_enable);
+
+gpio的设备节点是sys/devices/soc.0/78d9000.usb/backboard_power_enable。
+
+向该节点中写“enable” 和 “disable”来拉高和拉低该gpio。
+读该节点，得到“enabled”表示该gpio为高，“disabled”表示gpio为低。
+查看值 cat sys/devices/soc.0/78d9000.usb/backboard_power_enable
+
+
+
+11.logcat huansen1212 *:s  监听某个tag的所有打印
+
+
+12.增加一个按键，以ogt接入设备，模拟按键按下为例子
+
+
+中间层：
+（1） device\qcom\msm8916_64\gpio-keys.kl
+frameworks\base\data\keyboards\Generic.kl
+  增加一行
+ //add by huansen for USB OTG 
+  keycode
+key 250  USB_OTG 
+（2）frameworks\native\include\input\InputEventLabels.h
+  //add by huansen for USB OTG keycode
+    DEFINE_KEYCODE(USB_OTG),
+
+（3）frameworks\native\include\android\keycodes.h
+  增加一个枚举
+      //add by huansen for USB OTG keycode
+    AKEYCODE_USB_OTG=262
+    // NOTE: If you add a new keycode here you must also add it to several other files.
+    //       Refer to frameworks/base/core/java/android/view/KeyEvent.java for the full list.
+
+
+
+ （4）frameworks\base\core\java\android\view\KeyEvent.java
+  增加定义
+//add by huansen for USB OTG keycode
+	public static final int KEYCODE_USB_OTG          = 262;
+         private static final int LAST_KEYCODE = KEYCODE_USB_OTG;
+   //add by huansen for USB OTG keycode
+		    case KeyEvent.KEYCODE_USB_OTG:
+                return true;
+
+      //add by huansen for USB OTG keycode
+		    case KeyEvent.KEYCODE_USB_OTG:
+                 return true;
+
+（5）frameworks\base\policy\src\com\android\internal\policy\impl\PhoneWindowManager.java
+在interceptKeyBeforeQueueing(KeyEvent event, int policyFlags)方法里增加
+
+  	else if ( keyCode == KeyEvent.KEYCODE_USB_OTG ) {
+             //add by huansen for USB OTG keycode
+             Intent intent = new Intent("android.intent.ACTION_USB_OTG_KEY");
+
+             Log.i("huansen123", "intent ACTION_USB_OTG_KEY");
+             intent.putExtra("action", down ? "down" : "up");
+             mContext.sendBroadcast(intent);
+       } 
+(6)frameworks\base\core\res\res\values\attrs.xml
+增加：
+  <!-- add by huansen for USB OTG keycode -->
+        <enum name="KEYCODE_USB_OTG" value="262" />
+
+
+内核层：
+（1）kernel\include\uapi\linux\input.h
+增加一行 增加按键事件
+#define KEY_USB_OTG    250 //add by huansen for USB OTG keycode
+（2）kernel\drivers\input\keyboard\gpio_key.c
+
+  350行增加  注册能产生这个按键事件
+//add by huansen for USB OTG keycode
+static struct input_dev *otg_key_input_dev = NULL;
+void usb_otg_input_report_key(unsigned int code, int value)
+{
+	if (!otg_key_input_dev) {
+		printk("%s otg_key_input_dev = NULL\n", __func__);
+		return ;
+	}
+    printk("%sinpu_sync_usbotgkeycode\n",__func__);
+	input_report_key(otg_key_input_dev, code, value);
+	input_sync(otg_key_input_dev);
+}
+//end add huansen
+
+814行增加
+//add by huansen for USB OTG keycode
+	input_set_capability(input, EV_KEY, KEY_USB_OTG); 
+824行增加
+  //add by huansen for USB OTG keycode
+	otg_key_input_dev = input;
+（3）kernel\drivers\usb\phy\phy-msm-usb.c
+//add by huansen for USB OTG keycode 声明
+void usb_otg_input_report_key(unsigned int code, int value);  //20170113
+
+               usb_otg_input_report_key(KEY_USB_OTG, 1); //20170113
+		printk("%s,usb_otgkeycode_0\n",__func__);
+		usb_otg_input_report_key(KEY_USB_OTG, 0);//20170113
+注明：
+从内核获得输入事件上报后，经过本地运行库，到inputmanagerservice.java获得输入事件，进而返回回调PhoneWindowmanager.java处理不用显示activity的事件，比如截屏，电源管理，声音加减等，需要activity处理的继续分发给ViewRootimpl.java根控件处理，进而发送到activity.java,再传到具体的ui组件PhoneWindow处理，进而传到DecorView,ViewGroup,View,最终在具体的控件TextView处理。
+
+13.烧写指令
+
+
+adb reboot bootloader
+sudo fastboot devices
+#sudo fastboot flash aboot $OUT_PATH/emmc_appsboot.mbn
+#sudo fastboot flash boot $OUT_PATH/boot.img
+sudo fastboot flash system $OUT_PATH/system.img
+#sudo fastboot flash persist $OUT_PATH/persist.img
+#sudo fastboot flash userdata $OUT_PATH/userdata.img
+#sudo fastboot flash splash $OUT_PATH/splash.img
+sudo fastboot reboot
+
+
+14.SPI驱动框架
+14.1 枚举过程
+drivers/spi/spi.c:
+    spi_register_board_info
+        /* 对于每一个spi_master,调用spi_match_master_to_boardinfo */
+        list_for_each_entry(master, &spi_master_list, list)
+            spi_match_master_to_boardinfo
+            /* board_info里含有bus_num, 如果某个spi_master的bus_num跟它一样
+             * 则创建一个新的spi_device
+             */
+                    if (master->bus_num == bi->busnum)
+                        spi_new_device
+                            spi_alloc_device
+                            /* 记录bi信息, 比如片选，MODE，MAX HZ */    
+                            spi_add_device /* 根据名字找到spi_driver, 调用它的probe函数 */
+                                spi_setup(spi);
+                                device_add  /* 会绑定到一个spi_driver */
+
+14.2 数据收发过程
+    spi_write
+        spi_message_init(&m);
+        初始化一个spi_message  /* 一个不可打断的SPI传输过程: cs=0,传数据,cs=1 */
+                               /* 一个spi_message由多个spi_transfer组成 */
+        spi_message_add_tail(&t, &m);  /* spi_transfe是SPI上传输的单方向1个或多个字节 */
+        spi_sync(spi, &m);  /* 启动传输并等待完成 */
+    
+14.3 spi_driver如何调用spi_controller
+    spi_sync
+        __spi_sync(spi, message, 0);
+            spi_async_locked
+                __spi_async
+                    master->transfer(spi, message);
+            wait_for_completion
+
+15.
+15.1.修改frameworks\base\core\res\res\values\config.xml中config_lidOpenRotation的值为90。
+15.2.修改frameworks\base\services\core\java\com\android\server\wm\WindowManagerService.java中：
+   int mRotation = 1;
+15.3.修改frameworks\native\services\surfaceflinger\DisplayDevice.cpp里面:
+  setProjection(DisplayState::eOrientation90, mViewport, mFrame);
+15.4、交换一下Bootanimation 里面的h和w
+
+16.1hardware\libhardware\modules\camera\cameraHAL.cpp 
+
+static CameraHAL gCameraHAL(2);
+   默认只有两个摄像头，前置和后置，
+
+     private byte[] data = new byte[]{
+            (byte) 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0c, 0x0d, 0x0e, 0x0f};
+    /**
+    public static String
+    bcdToString(byte[] data, int offset, int length) {
+        StringBuilder ret = new StringBuilder(length * 2);
+
+        for (int i = offset; i < offset + length; i++) {
+            byte b;
+            int v;
+
+            v = data[i] & 0xf;
+            ret.append((char) ('0' + v));
+            v = (data[i] >> 4) & 0xf;
+            // Some PLMNs have 'f' as high nibble, ignore it
+            if (v == 0xf) continue;
+            ret.append((char) ('0' + v));
+        }
+
+        return ret.toString();
+    }
+
+17.解决
+[  276.864284] type=1400 audit(1491879895.354:78): avc: denied { read write } for pid=7421 comm="ino.fingerprint" name="ttyHSL1" dev="tmpfs" ino=7620 scontext=u:r:untrusted_app:s0 tcontext=u:object_r:serial_device:s0 tclass=chr_file permissive=0
